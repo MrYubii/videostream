@@ -2,7 +2,6 @@ import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
-from io import BytesIO
 from pathlib import Path
 from typing import BinaryIO, Iterator, Optional
 
@@ -94,7 +93,8 @@ class LocalStorageBackend(StorageBackend):
 class AzureBlobStorageBackend(StorageBackend):
     def __init__(self, connection_string: str, container: str) -> None:
         try:
-            from azure.storage.blob import BlobServiceClient
+            from azure.core.exceptions import ResourceExistsError
+            from azure.storage.blob import BlobServiceClient, ContentSettings
         except ImportError as exc:
             raise RuntimeError(
                 "Azure Blob storage selected but 'azure-storage-blob' is not installed. "
@@ -102,11 +102,19 @@ class AzureBlobStorageBackend(StorageBackend):
             ) from exc
         self.container = container
         self.service = BlobServiceClient.from_connection_string(connection_string)
-        self.service.create_container(name=container)
+        try:
+            self.service.create_container(name=container)
+        except ResourceExistsError:
+            pass
+        self._content_settings = ContentSettings
 
     def save(self, key: str, data: BinaryIO, content_type: str) -> None:
         client = self.service.get_blob_client(container=self.container, blob=key)
-        client.upload_blob(data, overwrite=True)
+        client.upload_blob(
+            data,
+            overwrite=True,
+            content_settings=self._content_settings(content_type=content_type),
+        )
 
     def read(self, key: str) -> Optional[BinaryIO]:
         client = self.service.get_blob_client(container=self.container, blob=key)
@@ -130,7 +138,8 @@ class AzureBlobStorageBackend(StorageBackend):
 
     def delete(self, key: str) -> None:
         client = self.service.get_blob_client(container=self.container, blob=key)
-        client.delete_blob()
+        if client.exists():
+            client.delete_blob()
 
     def public_url(self, key: str) -> str:
         return f"https://{self.service.account_name}.blob.core.windows.net/{self.container}/{key}"
@@ -181,10 +190,7 @@ def get_storage_backend() -> StorageBackend:
     if settings.storage_backend == "local":
         return LocalStorageBackend(settings.media_root)
     if settings.storage_backend == "azure":
-        return AzureBlobStorageBackend(
-            settings.azure_connection_string,
-            settings.azure_container,
-        )
+        return AzureBlobStorageBackend(settings.azure_connection_string, settings.azure_container)
     if settings.storage_backend == "s3":
         return S3StorageBackend(settings.s3_bucket, settings.s3_region)
     raise ValueError(f"Unknown storage backend: {settings.storage_backend}")
