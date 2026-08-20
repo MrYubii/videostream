@@ -86,7 +86,7 @@ def _serialize(video: Video, agg: Optional[dict] = None, include_detail: bool = 
         "genre": video.genre,
         "age_rating": video.age_rating.value,
         "description": video.description,
-        "thumbnail_url": storage.public_url(video.thumbnail_key) if video.thumbnail_key else "",
+        "thumbnail_url": f"/api/videos/{video.id}/thumbnail" if video.thumbnail_key else "",
         "duration_seconds": video.duration_seconds,
         "status": video.status.value,
         "view_count": video.view_count,
@@ -199,6 +199,21 @@ def delete_video(
     videos.delete(video)
     cache.invalidate_prefix("videos:list:")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{video_id}/thumbnail")
+def thumbnail(video_id: int, videos: VideoRepository = Depends(get_videos)):
+    video = videos.get(video_id)
+    if video is None or not video.thumbnail_key:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thumbnail not found")
+    if storage.size(video.thumbnail_key) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thumbnail file missing")
+    headers = {"Cache-Control": "public, max-age=86400", "Content-Type": "image/jpeg"}
+
+    def gen():
+        yield from storage.iter_read(video.thumbnail_key)
+
+    return StreamingResponse(gen(), headers=headers, media_type="image/jpeg")
 
 
 @router.get("/{video_id}/stream")
