@@ -1,338 +1,586 @@
-# VideoStream — Azure Deployment Guide (Task 2)
+# VideoStream — Azure Deployment + CI/CD Guide
 
-This guide provisions a production-ready VideoStream on **Microsoft Azure** using the same cloud platform explored in the practical exercises (App Service, PostgreSQL, Blob Storage, Cache for Redis, Front Door, Entra ID, Media Services).
+This is the recommended Task 2 deployment path for the current VideoStream implementation.
 
-> **Prerequisites:** Azure subscription, Owner/Contributor on resource group, Azure CLI (`az`) installed and logged in (`az login`).
+The coursework requires the solution to be implemented, deployed and tested on the cloud platform taught in the module, and the demonstration must show the deployed system and backend activity. The guide below uses **Azure App Service + Azure Database for PostgreSQL Flexible Server + Azure Blob Storage + GitHub Actions**.
 
----
+## 1. Target Azure architecture
 
-## 1. Architecture on Azure
+```text
+Browser
+   │ HTTPS
+   ▼
+Azure Front Door (optional: WAF + custom DNS + TLS)
+   │
+   ▼
+Azure App Service (Linux / Python 3.11)
+   │
+   ├──────────────► PostgreSQL Flexible Server
+   │
+   ├──────────────► Azure Blob Storage
+   │
+   └──────────────► Optional Azure Managed Redis
 
+GitHub main
+   │ push
+   ▼
+GitHub Actions
+   ├── install dependencies
+   ├── pytest
+   └── deploy only after tests pass
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            AZURE REGION                                      │
-│  ┌──────────────────┐   ┌──────────────────┐   ┌────────────────────────┐  │
-│  │  Azure Front Door│──►│  App Service     │   │  Azure Database for    │  │
-│  │  (WAF, TLS, DNS) │   │  (Linux, Python) │   │  PostgreSQL Flexible   │  │
-│  └────────┬─────────┘   └────────┬─────────┘   │  Server (videos DB)    │  │
-│           │                      │             └───────────┬────────────┘  │
-│           │                      │                       │               │
-│           │         ┌────────────┴────────────┐          │               │
-│           │         │                         │          │               │
-│           ▼         ▼                         ▼          ▼               │
-│  ┌────────────────┐  ┌────────────────┐  ┌──────────┐  ┌──────────┐    │
-│  │ Azure Blob     │  │ Azure Cache    │  │ Entra ID │  │ Media    │    │
-│  │ Storage        │  │ for Redis      │  │ (OIDC)   │  │ Services │    │
-│  │ (videos +      │  │ (session +     │  │          │  │ (optional│    │
-│  │  thumbnails)   │  │  rate limit)   │  │          │  │  transc.)│    │
-│  └────────────────┘  └────────────────┘  └──────────┘  └──────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
 
----
+Microsoft's current App Service documentation states that Python applications can use deployment build automation from `requirements.txt`; for FastAPI on Python 3.13 or earlier, a custom startup command is required. This project therefore uses Python 3.11 and an explicit Gunicorn/Uvicorn startup command. citeturn4search0turn4search1
 
-## 2. Resource Provisioning (Bicep / ARM / CLI)
+## 2. Prerequisites
 
-### 2.1 Create Resource Group
+Install or access:
+
+- Azure subscription.
+- Azure CLI.
+- Git and GitHub access to `MrYubii/videostream`.
+- Python 3.11 locally for testing.
+
+Login:
+
 ```bash
-az group create --name rg-videostream --location uksouth
+az login
+az account show
 ```
 
-### 2.2 PostgreSQL Flexible Server
+Select the correct subscription if necessary:
+
+```bash
+az account set --subscription "YOUR_SUBSCRIPTION_ID"
+```
+
+## 3. Set deployment variables
+
+Use unique names for Azure resources. App Service and Storage Account names are globally constrained.
+
+```bash
+export LOCATION="uksouth"
+export RESOURCE_GROUP="rg-videostream-cw2"
+export APP_NAME="YOUR-UNIQUE-VIDEOSTREAM-APP"
+export PLAN_NAME="asp-videostream-cw2"
+export PG_NAME="YOUR-UNIQUE-VIDEOSTREAM-PG"
+export PG_ADMIN="videostreamadmin"
+export PG_PASSWORD="USE-A-STRONG-PASSWORD"
+export DB_NAME="videostream"
+export STORAGE_ACCOUNT="YOURUNIQUEVIDEOSTREAM"
+export STORAGE_CONTAINER="videos"
+```
+
+For Windows PowerShell, use `$env:NAME="value"` instead of `export NAME="value"`.
+
+## 4. Create the resource group
+
+```bash
+az group create \
+  --name "$RESOURCE_GROUP" \
+  --location "$LOCATION"
+```
+
+## 5. Create PostgreSQL Flexible Server
+
+Azure Database for PostgreSQL Flexible Server is the managed relational database target for the application. Microsoft documents Azure CLI provisioning and the standard PostgreSQL port as 5432. citeturn1search0turn1search3
+
+For a coursework/dev deployment, a small burstable SKU is sufficient; choose a larger SKU only if your subscription/course requires it.
+
 ```bash
 az postgres flexible-server create \
-  --resource-group rg-videostream \
-  --name pg-videostream \
-  --location uksouth \
-  --admin-user videostream_admin \
-  --admin-password 'StrongP@ssw0rd!' \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$PG_NAME" \
+  --location "$LOCATION" \
+  --admin-user "$PG_ADMIN" \
+  --admin-password "$PG_PASSWORD" \
   --sku-name Standard_B1ms \
   --tier Burstable \
   --storage-size 32 \
   --version 15 \
-  --public-access 0.0.0.0  # or VNet integration
+  --public-access 0.0.0.0
 ```
 
-Get connection string:
+Create the application database:
+
 ```bash
-CONN_STR=$(az postgres flexible-server show-connection-string \
-  --server-name pg-videostream \
-  --database videostream \
-  --admin-user videostream_admin \
-  --admin-password 'StrongP@ssw0rd!' \
-  --query connectionStrings.psql -o tsv)
-# Result: postgresql://videostream_admin:StrongP@ssw0rd!@pg-videostream.postgres.database.azure.com:5432/videostream?sslmode=require
+az postgres flexible-server db create \
+  --resource-group "$RESOURCE_GROUP" \
+  --server-name "$PG_NAME" \
+  --database-name "$DB_NAME"
 ```
 
-### 2.3 Azure Blob Storage
+**Important:** `0.0.0.0` is convenient for a coursework demonstration but is broader than a production network design. For a hardened deployment, restrict firewall/network access or use private networking/VNet integration. Azure supports both public-access firewall rules and private VNet deployment. citeturn1search3turn1search9
+
+### SQLAlchemy connection string
+
+Use the `psycopg` SQLAlchemy dialect installed by `requirements.txt`:
+
+```text
+postgresql+psycopg://USERNAME:PASSWORD@SERVER.postgres.database.azure.com:5432/videostream?sslmode=require
+```
+
+If the password contains characters such as `@`, `:`, `/`, `#`, or `%`, URL-encode it before placing it in the connection string.
+
+## 6. Create Azure Blob Storage
+
+The application already contains a `StorageBackend` abstraction with an Azure Blob implementation. Azure's current Python guidance recommends the `azure-storage-blob` client library for Blob Storage. citeturn1search1turn1search2
+
+Create the account:
+
 ```bash
 az storage account create \
-  --resource-group rg-videostream \
-  --name stvideostream$(date +%s) \
-  --location uksouth \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$STORAGE_ACCOUNT" \
+  --location "$LOCATION" \
   --sku Standard_LRS \
   --kind StorageV2 \
   --allow-blob-public-access false
-
-CONN_STR=$(az storage account show-connection-string -n stvideostream... -g rg-videostream -o tsv)
-az storage container create --name videos --account-name stvideostream... --connection-string "$CONN_STR"
-az storage container create --name thumbnails --account-name stvideostream... --connection-string "$CONN_STR"
 ```
 
-### 2.4 Azure Cache for Redis
+Get the connection string into a local shell variable:
+
 ```bash
-az redis create \
-  --resource-group rg-videostream \
-  --name rc-videostream \
-  --location uksouth \
-  --sku Basic \
-  --vm-size C0 \
-  --enable-non-ssl-port false
-```
-Get primary key:
-```bash
-REDIS_KEY=$(az redis list-keys -n rc-videostream -g rg-videostream --query primaryKey -o tsv)
-REDIS_HOST=rc-videostream.redis.cache.windows.net
+export AZURE_STORAGE_CONNECTION_STRING="$(az storage account show-connection-string \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$STORAGE_ACCOUNT" \
+  --query connectionString -o tsv)"
 ```
 
-### 2.5 App Service (Linux, Python 3.11)
+Create the container:
+
+```bash
+az storage container create \
+  --name "$STORAGE_CONTAINER" \
+  --account-name "$STORAGE_ACCOUNT" \
+  --connection-string "$AZURE_STORAGE_CONNECTION_STRING"
+```
+
+The application streams thumbnails and videos through the API, so the Blob container does **not** need to be publicly readable.
+
+## 7. Create Azure App Service
+
+Create a Linux App Service plan:
+
 ```bash
 az appservice plan create \
-  --resource-group rg-videostream \
-  --name asp-videostream \
-  --location uksouth \
-  --sku P1v3 \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$PLAN_NAME" \
+  --location "$LOCATION" \
+  --sku B1 \
   --is-linux
+```
 
+Create the web app:
+
+```bash
 az webapp create \
-  --resource-group rg-videostream \
-  --plan asp-videostream \
-  --name videostream-app \
-  --runtime "PYTHON|3.11" \
-  --deployment-container-image-name "python:3.11-slim"  # placeholder; we'll deploy zip
+  --resource-group "$RESOURCE_GROUP" \
+  --plan "$PLAN_NAME" \
+  --name "$APP_NAME" \
+  --runtime "PYTHON:3.11"
 ```
 
-### 2.6 Configure App Settings
+Enable App Service build automation so Azure installs `requirements.txt` during deployment. Microsoft's current documentation explicitly recommends `SCM_DO_BUILD_DURING_DEPLOYMENT=true` for this scenario. citeturn4search0turn4search1
+
 ```bash
-az webapp config appsettings set -g rg-videostream -n videostream-app --settings \
-  ENVIRONMENT=production \
-  SECRET_KEY="$(openssl rand -base64 48)" \
-  TOKEN_EXPIRY_MINUTES=120 \
-  DATABASE_URL="$CONN_STR" \
-  STORAGE_BACKEND=azure \
-  AZURE_CONNECTION_STRING="$CONN_STR" \
-  AZURE_CONTAINER=videos \
-  CACHE_TTL_SECONDS=30 \
-  RATE_LIMIT_REQUESTS=100 \
-  RATE_LIMIT_WINDOW_SECONDS=60 \
-  CORS_ORIGINS="https://videostream.example.com" \
-  PYTHONPATH=/home/site/wwwroot
+az webapp config appsettings set \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$APP_NAME" \
+  --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true
 ```
 
-### 2.7 Redis Session / Cache Middleware (Code Change)
-In `app/services/cache.py`, add a Redis implementation:
-```python
-# app/services/cache.py — add RedisCache class
-import redis.asyncio as redis
-import json
+## 8. Configure the FastAPI startup command
 
-class RedisCache:
-    def __init__(self, url: str):
-        self._client = redis.from_url(url, decode_responses=True)
+For Python 3.13 and earlier, Azure App Service requires a custom startup command for FastAPI. The project exposes `app.main:app`, so configure Gunicorn with Uvicorn workers. citeturn1search7
 
-    async def get(self, key: str):
-        val = await self._client.get(key)
-        return json.loads(val) if val else None
-
-    async def set(self, key: str, value, ttl: float):
-        await self._client.setex(key, int(ttl), json.dumps(value, default=str))
-
-    async def invalidate_prefix(self, prefix: str):
-        async for k in self._client.scan_iter(f"{prefix}*"):
-            await self._client.delete(k)
-```
-Swap `TTLCache` for `RedisCache` in `app/main.py` lifespan (initialise from `REDIS_URL=rediss://:{REDIS_KEY}@{REDIS_HOST}:6380`).
-
-### 2.8 Rate Limiter — Redis Backend
-Replace in-memory `InMemoryRateLimiter` with Redis sorted-set:
-```python
-# app/services/ratelimit.py — RedisRateLimiter
-import time, redis.asyncio as redis
-
-class RedisRateLimiter:
-    def __init__(self, url: str):
-        self._r = redis.from_url(url)
-
-    async def allow(self, key: str, limit: int, window: int) -> bool:
-        now = time.time()
-        pipe = self._r.pipeline()
-        pipe.zremrangebyscore(key, 0, now - window)
-        pipe.zcard(key)
-        pipe.zadd(key, {str(now): now})
-        pipe.expire(key, window)
-        _, count, _, _ = await pipe.execute()
-        return count < limit
-```
-
----
-
-## 3. Deployment Pipeline (GitHub Actions / Azure DevOps)
-
-### 3.1 Build & Deploy (GitHub Actions)
-```yaml
-# .github/workflows/azure-deploy.yml
-name: Deploy to Azure
-on:
-  push:
-    branches: [main]
-
-jobs:
-  build-deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
-      - name: Install deps
-        run: pip install -r requirements.txt
-      - name: Run tests
-        run: pytest tests -q
-      - name: Zip deploy
-        uses: azure/webapps-deploy@v2
-        with:
-          app-name: videostream-app
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: .
-```
-Add `AZURE_WEBAPP_PUBLISH_PROFILE` secret from `az webapp deployment list-publishing-profiles`.
-
-### 3.2 Database Migrations
-On startup, `Base.metadata.create_all(bind=engine)` runs (dev). For production, use **Alembic**:
 ```bash
-pip install alembic
-alembic init migrations
-# edit env.py to use DATABASE_URL from os.environ
-alembic revision --autogenerate -m "init"
+az webapp config set \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$APP_NAME" \
+  --startup-file "gunicorn --bind=0.0.0.0:8000 --workers=2 --worker-class=uvicorn.workers.UvicornWorker app.main:app"
+```
+
+Two workers are enough for a small coursework deployment. Scaling out the App Service plan can add more instances later.
+
+## 9. Configure application settings
+
+Set the production database, Blob Storage, authentication and CORS values:
+
+```bash
+az webapp config appsettings set \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$APP_NAME" \
+  --settings \
+    ENVIRONMENT=production \
+    SECRET_KEY="$(openssl rand -hex 32)" \
+    TOKEN_EXPIRY_MINUTES=120 \
+    DATABASE_URL="postgresql+psycopg://$PG_ADMIN:$PG_PASSWORD@$PG_NAME.postgres.database.azure.com:5432/$DB_NAME?sslmode=require" \
+    STORAGE_BACKEND=azure \
+    AZURE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING" \
+    AZURE_CONTAINER="$STORAGE_CONTAINER" \
+    MEDIA_ROOT="/home/data/media" \
+    MAX_UPLOAD_MB=200 \
+    CACHE_TTL_SECONDS=30 \
+    RATE_LIMIT_REQUESTS=100 \
+    RATE_LIMIT_WINDOW_SECONDS=60 \
+    CORS_ORIGINS="https://$APP_NAME.azurewebsites.net"
+```
+
+**Do not commit these values to GitHub.** Azure App Service application settings are exposed to the application as environment variables. For stronger production security, move secrets to Azure Key Vault and reference them from App Service.
+
+## 10. Database initialization
+
+The current application calls `Base.metadata.create_all()` during application startup. That is convenient for this coursework because the empty PostgreSQL database can create the required tables automatically.
+
+For a production system with ongoing schema evolution, introduce Alembic migrations and run:
+
+```bash
 alembic upgrade head
 ```
-Run as a **pre-deploy** step or separate container job.
 
----
+as a controlled pre-deployment migration step. Do not rely on `create_all()` for destructive or complex production schema changes.
 
-## 4. Optional: Entra ID (OIDC) Authentication
+## 11. Local validation before deployment
 
-Replace self-issued JWT with Microsoft Entra ID tokens:
+From the project root:
 
-1. **App Registration** — Single-tenant, redirect URI `https://videostream.example.com/.auth/login/aad/callback`.
-2. **Expose API** — Define `access_as_user` scope; add `roles` claim (`admin`, `creator`, `consumer`).
-3. **App Service Easy Auth** — Enable Authentication → Microsoft Entra ID; set allowed token audiences.
-4. **Middleware Swap** — In `app/deps.py`:
-   ```python
-   from msal import ConfidentialClientApplication
-   # Validate Authorization: Bearer <aad_token> via jose.jwt.decode with Entra ID JWKS
-   # Map `roles` claim → Role enum
-   ```
-5. **Admin Creator Enrolment** — Now UI can use Entra ID groups or Graph API.
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests -q
+```
 
----
-
-## 5. Optional: Azure Media Services (Advanced Transcoding)
-
-For production-grade transcoding (adaptive bitrate, HLS/DASH, DRM):
-
-1. **Create Media Services Account** (same region).
-2. **Transform** — Define `BuiltInStandardEncoderPreset` (H264MultipleBitrate720p, etc.).
-3. **Upload Flow** —
-   - `POST /api/videos` stores original in Blob `raw/` container.
-   - Background task creates **Job** with Transform → outputs to `processed/` container.
-   - Job completion Event Grid → webhook `/api/webhooks/media-services` updates `Video.status=ready`, writes `stream_url` (HLS manifest `.m3u8`).
-4. **Streaming Endpoint** — Start Standard Streaming Endpoint; CDN in front.
-
----
-
-## 6. DNS, TLS & WAF (Front Door)
+Linux/macOS:
 
 ```bash
-az afd profile create -g rg-videostream -n afd-videostream --sku Premium_AzureFrontDoor
-az afd endpoint create -g rg-videostream --profile-name afd-videostream -n videostream-fd --origin videostream-app.azurewebsites.net --origin-host-header videostream-app.azurewebsites.net
-az afd custom-domain create -g rg-videostream --profile-name afd-videostream --endpoint-name videostream-fd -n video-custom --host-name videostream.example.com --validation-token <from DNS TXT>
-az afd custom-domain enable-https -g rg-videostream --profile-name afd-videostream --endpoint-name videostream-fd --custom-domain-name video-custom --certificate-type ManagedCertificate
-az afd waf-policy create -g rg-videostream -n waf-videostream --policy-mode Prevention
-# Attach WAF policy to endpoint
+python -m pytest tests -q
 ```
-Result: `https://videostream.example.com` → Front Door (WAF, TLS, caching) → App Service.
 
----
+Expected result for the existing test suite is the full passing suite documented in the repository README. The CI pipeline uses the same test command.
 
-## 7. Monitoring & Observability
+## 12. First manual Azure deployment
 
-| Component | Tool |
-|-----------|------|
-| App logs / metrics | Azure Monitor → Log Analytics Workspace → `AppServiceConsoleLogs`, `AppServiceHTTPLogs` |
-| Distributed tracing | Application Insights (auto-instrument Python via `opentelemetry-instrument`) |
-| Alerts | CPU > 80%, 5xx > 1%, Redis memory > 85% |
-| Cost | Cost Management + Advisor (right-size App Service plan, Redis tier) |
+Before configuring GitHub Actions, it is useful to prove that the Azure resources and application configuration work.
 
-Add to `requirements.txt`:
+```bash
+az webapp up \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$APP_NAME" \
+  --runtime "PYTHON:3.11" \
+  --sku B1
 ```
-opentelemetry-instrument
-opentelemetry-exporter-azuremonitor
+
+Alternatively, use a ZIP deployment. Azure documents ZIP deployment with build automation enabled through `SCM_DO_BUILD_DURING_DEPLOYMENT`. citeturn4search1turn4search4
+
+Check the application:
+
+```bash
+az webapp browse --resource-group "$RESOURCE_GROUP" --name "$APP_NAME"
 ```
-Start with `opentelemetry-instrument uvicorn app.main:app`.
 
----
+Then verify:
 
-## 8. Security Hardening Checklist
+```text
+https://YOUR-APP.azurewebsites.net/
+https://YOUR-APP.azurewebsites.net/docs
+```
 
-- [ ] `SECRET_KEY` from Key Vault (`@Microsoft.KeyVault(SecretUri=...)`)
-- [ ] PostgreSQL: `sslmode=require`, firewall only App Service subnet (VNet integration)
-- [ ] Blob: `allowBlobPublicAccess=false`, SAS tokens for signed URLs if needed
-- [ ] App Service: `WEBSITE_VNET_ROUTE_ALL=1`, Private Endpoint for Postgres/Redis/Blob
-- [ ] Front Door: WAF managed rules (OWASP 3.2), rate limit rule (100 req/10s/IP)
-- [ ] Entra ID: Conditional Access (MFA for admins), token lifetime 60 min
-- [ ] Secrets rotation: Key Vault rotation policy + App Service restart via Event Grid
+The `/docs` endpoint should show FastAPI Swagger UI.
 
----
+## 13. GitHub Actions CI/CD
 
-## 9. Cost Estimation (Monthly, UK South, indicative)
+The repository now contains:
 
-| Resource | SKU | Est. Cost (GBP) |
-|----------|-----|-----------------|
-| App Service Plan | P1v3 (1 instance) | ~£110 |
-| PostgreSQL Flexible | B1ms, 32 GB | ~£35 |
-| Blob Storage (Hot) | 100 GB + ops | ~£2 |
-| Cache for Redis | Basic C0 (250 MB) | ~£12 |
-| Front Door | Premium, 1M req | ~£15 |
-| Media Services (optional) | S1, 10 jobs/mo | ~£50 |
-| **Total (core)** | | **~£174/mo** |
+```text
+.github/workflows/ci-cd.yml
+```
 
-Scale down to **B1/B2** for dev/test; enable **autoscale** on App Service.
+The workflow performs:
 
----
+```text
+Pull Request → main
+      │
+      ▼
+Install dependencies → pytest
+      │
+      └── fail → deployment stops
 
-## 10. Rollback & Disaster Recovery
+Push → main
+      │
+      ▼
+Install dependencies → pytest
+      │
+      ▼
+Azure OIDC login
+      │
+      ▼
+azure/webapps-deploy@v3
+      │
+      ▼
+Azure App Service
+```
 
-- **App Service** — Deployment slots (`staging`); swap for zero-downtime; rollback = swap back.
-- **Database** — Point-in-time restore (PITR) up to 35 days; manual `pg_dump` to Blob weekly.
-- **Blob** — Soft delete (14 days), versioning, lifecycle policy (cool/archive after 30/90 days).
-- **Redis** — Geo-replication (Premium) for cross-region HA.
+Microsoft's current App Service documentation recommends GitHub Actions and supports OpenID Connect authentication with `azure/login@v2` and deployment with `azure/webapps-deploy@v3`. citeturn2search0turn2search1
 
----
+### 13.1 Create an Entra application for GitHub OIDC
 
-## 11. Validation Checklist (Task 2 Deliverable)
+Set:
 
-- [ ] Resource group with all resources deployed via CLI/Bicep
-- [ ] App Service returns `200` at `/` and `/docs`
-- [ ] `POST /api/auth/register` → `201` (consumer)
-- [ ] Admin login → `POST /api/admin/creators` → `201`
-- [ ] Creator login → `POST /api/videos` upload → `201` → background processing → `ready`
-- [ ] `GET /api/videos/{id}/stream` plays in browser (seek works)
-- [ ] Comments & ratings persist
-- [ ] Front Door custom domain `https://videostream.example.com` loads
-- [ ] WAF blocks test SQLi/XSS payload (403)
-- [ ] Logs appear in Log Analytics
+```bash
+export GITHUB_OWNER="MrYubii"
+export GITHUB_REPO="videostream"
+```
 
----
+Create an app registration:
 
-*This guide aligns with the practical exercises' Azure platform focus. Adjust SKUs, regions, and naming to your subscription policies.*
+```bash
+export APP_ID="$(az ad app create \
+  --display-name "github-videostream-cicd" \
+  --query appId -o tsv)"
+```
+
+Create the service principal:
+
+```bash
+az ad sp create --id "$APP_ID"
+```
+
+Grant it Contributor access to the coursework resource group. For stricter least privilege, use a more specific Website Contributor scope after the initial deployment is working.
+
+```bash
+export SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+
+az role assignment create \
+  --assignee "$APP_ID" \
+  --role Contributor \
+  --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP"
+```
+
+Create the GitHub OIDC federated credential:
+
+```bash
+cat > /tmp/github-oidc.json <<EOF
+{
+  "name": "github-main",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:$GITHUB_OWNER/$GITHUB_REPO:ref:refs/heads/main",
+  "description": "GitHub Actions main branch deployment",
+  "audiences": ["api://AzureADTokenExchange"]
+}
+EOF
+
+az ad app federated-credential create \
+  --id "$APP_ID" \
+  --parameters /tmp/github-oidc.json
+```
+
+Record:
+
+```text
+AZURE_CLIENT_ID       = APP_ID
+AZURE_TENANT_ID       = your Entra tenant ID
+AZURE_SUBSCRIPTION_ID = your Azure subscription ID
+```
+
+## 14. Add GitHub Actions secrets and variable
+
+In GitHub:
+
+```text
+Repository → Settings → Secrets and variables → Actions
+```
+
+Add **repository secrets**:
+
+```text
+AZURE_CLIENT_ID
+AZURE_TENANT_ID
+AZURE_SUBSCRIPTION_ID
+```
+
+Add a **repository variable**:
+
+```text
+AZURE_WEBAPP_NAME = YOUR-APP-NAME
+```
+
+Do not add the PostgreSQL password or Blob connection string to GitHub Actions. Those belong in Azure App Service configuration/Key Vault.
+
+## 15. Test the pipeline
+
+Create a small commit on a feature branch and open a Pull Request to `main`.
+
+Expected:
+
+1. GitHub Actions starts.
+2. Python 3.11 is installed.
+3. Dependencies are installed.
+4. `pytest tests -q` executes.
+5. A failing test blocks deployment.
+
+After merging to `main`:
+
+1. CI runs again.
+2. Azure OIDC authentication occurs.
+3. `azure/webapps-deploy@v3` deploys the repository.
+4. App Service runs the configured Gunicorn startup command.
+5. Oryx installs `requirements.txt` because `SCM_DO_BUILD_DURING_DEPLOYMENT=true`.
+
+## 16. Validate authentication after deployment
+
+### Consumer
+
+Open:
+
+```text
+https://YOUR-APP.azurewebsites.net/signup.html
+```
+
+Register a consumer and then sign in.
+
+Expected API flow:
+
+```http
+POST /api/auth/register
+POST /api/auth/login
+GET  /api/auth/me
+```
+
+### Creator
+
+1. Sign in as the seeded/admin account or another administrator.
+2. Open the admin panel.
+3. Create a creator account.
+4. Sign out.
+5. Open `/creator-login.html`.
+6. Sign in with the new creator credentials.
+7. Verify the Upload control appears.
+8. Upload a video with Title, Publisher, Producer, Genre and Age Rating.
+
+A consumer attempting `POST /api/videos` must receive `403 Forbidden`.
+
+## 17. Validate video processing and streaming
+
+After creator upload:
+
+```text
+processing → FFmpeg probe/transcode → thumbnail → ready
+```
+
+Verify:
+
+```http
+GET /api/videos
+GET /api/videos/{id}
+GET /api/videos/{id}/thumbnail
+GET /api/videos/{id}/stream
+```
+
+Use browser seeking to demonstrate HTTP Range support. The response should include `206 Partial Content` for a valid Range request.
+
+## 18. Backend evidence for the 5-minute demonstration
+
+Show the Azure portal and deployed application together. A strong demonstration sequence is:
+
+1. GitHub Actions successful CI/CD run.
+2. Azure App Service overview and deployed URL.
+3. Swagger `/docs` showing REST endpoints.
+4. Admin creates a creator.
+5. Creator signs in.
+6. Creator uploads a video and metadata.
+7. Backend initially returns `processing`.
+8. Background media processing changes the video to `ready`.
+9. Consumer signs in and watches the video.
+10. Consumer comments, rates and reacts.
+11. Show the PostgreSQL/Blob resources receiving application data.
+12. Explain where scalability is achieved and identify remaining limitations.
+
+This directly supports the coursework requirement that the recorded demonstration shows both solution functionality and deployment/backend activity.
+
+## 19. Optional scale-out enhancements
+
+### Azure Managed Redis
+
+The original repository documentation mentioned Azure Cache for Redis. For a new 2026 deployment, prefer **Azure Managed Redis** rather than creating a new Azure Cache for Redis instance. Microsoft says Azure Cache for Redis is being retired and recommends migration to Azure Managed Redis; Basic/Standard/Premium instances are scheduled for retirement in 2028. citeturn0search0turn0search2turn0search13
+
+Use Redis for:
+
+- distributed dashboard cache;
+- distributed rate limiting;
+- future session/state coordination.
+
+The current application keeps the local TTL cache as a coursework-friendly default. Redis should be added when running multiple App Service instances.
+
+### Azure Front Door
+
+Add Azure Front Door when you want:
+
+- custom DNS;
+- managed TLS;
+- WAF rules;
+- edge caching/routing;
+- a single public entry point in front of App Service.
+
+## 20. Monitoring
+
+Enable Application Insights/Azure Monitor and record:
+
+- request count;
+- average response time;
+- failed requests/HTTP 5xx;
+- CPU and memory;
+- App Service instance count;
+- database performance;
+- Blob storage usage.
+
+These measurements provide evidence for the coursework rubric's scalability/performance evaluation rather than relying only on qualitative claims.
+
+## 21. Security checklist
+
+- [ ] HTTPS only.
+- [ ] Strong random `SECRET_KEY`.
+- [ ] Production CORS allow-list.
+- [ ] PostgreSQL SSL enabled.
+- [ ] Blob public access disabled.
+- [ ] Secrets not committed to GitHub.
+- [ ] Key Vault considered for production secrets.
+- [ ] Consumer cannot self-register as creator/admin.
+- [ ] Creator upload role enforced server-side.
+- [ ] Creator ownership checks enforced server-side.
+- [ ] Upload MIME type, extension and size validation enabled.
+- [ ] Rate limiting enabled.
+- [ ] GitHub Actions uses OIDC rather than a long-lived Azure password.
+
+## 22. Rollback
+
+If a deployment breaks the application:
+
+1. Open GitHub Actions and identify the last successful commit.
+2. Revert the bad commit and push to `main`, or deploy the previous known-good commit.
+3. If using App Service deployment slots, deploy to staging first and swap only after validation.
+4. Do not manually edit production source code in the App Service container.
+
+## 23. Final acceptance checklist
+
+- [ ] Azure resource group exists.
+- [ ] PostgreSQL Flexible Server exists.
+- [ ] `videostream` database exists.
+- [ ] Blob Storage account/container exists.
+- [ ] App Service is running Linux/Python 3.11.
+- [ ] `SCM_DO_BUILD_DURING_DEPLOYMENT=true`.
+- [ ] Gunicorn/Uvicorn startup command configured.
+- [ ] Production `DATABASE_URL` configured.
+- [ ] Azure Blob settings configured.
+- [ ] Consumer registration works.
+- [ ] Consumer login works.
+- [ ] Admin can create creators.
+- [ ] Creator login works.
+- [ ] Consumer cannot upload.
+- [ ] Creator can upload.
+- [ ] Media reaches `ready`.
+- [ ] Thumbnail displays.
+- [ ] Range streaming works.
+- [ ] Comments/ratings/reactions persist.
+- [ ] GitHub Actions tests pass.
+- [ ] GitHub Actions deploys `main` automatically.
+- [ ] Azure logs show successful startup.
+- [ ] Demonstration evidence has been recorded.
