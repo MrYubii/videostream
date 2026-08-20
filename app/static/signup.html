@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign up — VideoStream</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="nav-slot"></div>
+
+  <form id="signupForm" class="form-card">
+    <h1>Create consumer account</h1>
+    <p class="muted" style="font-size:13px; margin-bottom:18px;">
+      Consumer accounts can watch, search, comment and rate videos.
+      Creator accounts are issued by an administrator only.
+    </p>
+    <div class="form-field"><label>Username</label><input name="username" required minlength="3" maxlength="64" autocomplete="username"></div>
+    <div class="form-field"><label>Email</label><input name="email" type="email" required autocomplete="email"></div>
+    <div class="form-field"><label>Full name</label><input name="full_name" maxlength="128"></div>
+    <div class="form-field"><label>Password (min 8 chars)</label><input name="password" type="password" required minlength="8" autocomplete="new-password"></div>
+    <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Sign up</button>
+    <div class="error" id="error"></div>
+    <div class="hint">Already have an account? <a href="/login.html" style="color:var(--accent-2);">Sign in</a></div>
+  </form>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/common.js"></script>
+  <script>
+    initNav("");
+    document.getElementById("signupForm").onsubmit = async (e) => {
+      e.preventDefault();
+      document.getElementById("error").textContent = "";
+      const f = e.target;
+      try {
+        const res = await API.post("/api/auth/register", {
+          username: f.username.value.trim(),
+          email: f.email.value.trim(),
+          full_name: f.full_name.value.trim(),
+          password: f.password.value,
+        });
+        setCurrentUser(res);
+        const login = await API.post("/api/auth/login", {
+          username: f.username.value.trim(),
+          password: f.password.value,
+        });
+        localStorage.setItem("token", login.access_token);
+        setCurrentUser({ username: login.username, role: login.role });
+        location.href = "/";
+      } catch (err) {
+        document.getElementById("error").textContent = err.message;
+      }
+    };
+  </script>
+</body>
+</html>

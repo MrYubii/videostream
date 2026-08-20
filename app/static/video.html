@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VideoStream — Watch</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="nav-slot"></div>
+
+  <main class="container">
+    <a href="/" class="btn btn-ghost" style="margin-bottom:16px;">← Dashboard</a>
+
+    <div class="detail-grid">
+      <div>
+        <video id="player" class="player" controls playsinline preload="metadata"></video>
+        <div id="status" class="muted" style="margin-top:12px; padding:12px 16px; border:1px solid var(--border); border-radius:var(--radius); background:var(--panel);" hidden></div>
+        <div class="panel" style="margin-top:16px;">
+          <div style="display:flex; align-items:flex-start; gap:12px; margin-bottom:8px;">
+            <h1 id="title" style="font-size:20px; flex:1;"></h1>
+            <button class="btn btn-ghost" id="shareBtn">Share</button>
+            <button class="btn btn-ghost" id="editBtn" hidden>Edit</button>
+            <button class="btn btn-ghost" id="deleteBtn" hidden>Delete</button>
+          </div>
+          <div class="meta" id="meta"></div>
+          <p id="description" class="muted" style="margin-top:12px; line-height:1.6;"></p>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel" style="margin-bottom:16px;">
+          <h2>Rate this video</h2>
+          <div class="rating-stars" id="stars">
+            <span data-v="1">★</span><span data-v="2">★</span><span data-v="3">★</span>
+            <span data-v="4">★</span><span data-v="5">★</span>
+          </div>
+          <div class="meta" id="ratingInfo" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="panel" style="margin-bottom:16px;">
+          <h2>Reactions</h2>
+          <div class="reactions">
+            <button type="button" class="react-btn" id="likeBtn">Like <span id="likeCount" class="count">0</span></button>
+            <button type="button" class="react-btn" id="dislikeBtn">Dislike <span id="dislikeCount" class="count">0</span></button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Comments</h2>
+          <div id="comments"></div>
+          <form id="commentForm" class="comment-form">
+            <input type="text" placeholder="Add a comment…" required maxlength="1000">
+            <button class="btn btn-primary" type="submit">Post</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <dialog id="editModal">
+    <form id="editForm" class="form-card" style="margin:0; max-width:520px;">
+      <h1>Edit video</h1>
+      <div class="form-field"><label>Title</label><input name="title" required maxlength="255"></div>
+      <div class="form-field"><label>Publisher</label><input name="publisher" required maxlength="128"></div>
+      <div class="form-field"><label>Producer</label><input name="producer" maxlength="128"></div>
+      <div class="form-field"><label>Genre</label><input name="genre" required maxlength="64"></div>
+      <div class="form-field"><label>Age rating</label>
+        <select name="age_rating"><option>U</option><option>PG</option><option>12</option><option>15</option><option>18</option></select>
+      </div>
+      <div class="form-field"><label>Description</label><textarea name="description" rows="3" maxlength="2000"></textarea></div>
+      <div class="error" id="editError"></div>
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button type="button" class="btn" onclick="document.getElementById('editModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/common.js"></script>
+  <script src="/js/video.js"></script>
+</body>
+</html>

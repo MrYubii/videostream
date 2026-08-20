@@ -1,0 +1,59 @@
+INFO:     127.0.0.1:63778 - "GET /video.html?id=25 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63778 - "GET /css/style.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53794 - "GET /js/api.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63778 - "GET /js/video.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57514 - "GET /js/common.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63778 - "GET /favicon.svg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57514 - "GET /api/videos/25 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54513 - "GET /api/videos/25/stream HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:53794 - "GET /api/videos/25/comments HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63778 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57514 - "GET /api/videos/25/rating HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57514 - "GET /api/videos/25/stream HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:63778 - "GET /api/videos/25/stream HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:53794 - "GET /api/videos/25/stream HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:62176 - "GET /api/videos/25/stream HTTP/1.1" 206 Partial Content
+INFO:     127.0.0.1:55444 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55444 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55444 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55444 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55444 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55444 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55444 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55444 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54055 - "GET /api/videos HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54057 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59730 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59730 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51464 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65010 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65010 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65010 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65010 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65010 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65010 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65010 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65010 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65010 - "PUT /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65010 - "GET /api/videos/25/reaction HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65010 - "POST /api/videos/25/comments HTTP/1.1" 201 Created
+INFO:     127.0.0.1:65010 - "GET /api/videos/25/comments HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58006 - "PUT /api/videos/25/rating HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58006 - "GET /api/videos/25/rating HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58006 - "PUT /api/videos/25/rating HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58006 - "GET /api/videos/25/rating HTTP/1.1" 200 OK

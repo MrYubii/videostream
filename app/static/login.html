@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in — VideoStream</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="nav-slot"></div>
+
+  <form id="loginForm" class="form-card">
+    <h1>Welcome back</h1>
+    <div class="form-field"><label>Username</label><input name="username" required autocomplete="username"></div>
+    <div class="form-field"><label>Password</label><input name="password" type="password" required autocomplete="current-password"></div>
+    <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Sign in</button>
+    <div class="error" id="error"></div>
+    <div class="hint">New to VideoStream? <a href="/signup.html" style="color:var(--accent-2);">Create an account</a></div>
+  </form>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/common.js"></script>
+  <script>
+    initNav("");
+    document.getElementById("loginForm").onsubmit = async (e) => {
+      e.preventDefault();
+      document.getElementById("error").textContent = "";
+      const f = e.target;
+      try {
+        const res = await API.post("/api/auth/login", {
+          username: f.username.value.trim(),
+          password: f.password.value,
+        });
+        localStorage.setItem("token", res.access_token);
+        setCurrentUser({ username: res.username, role: res.role });
+        const next = new URLSearchParams(location.search).get("next");
+        let dest = "/";
+        if (next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\")) dest = next;
+        location.href = dest;
+      } catch (err) {
+        document.getElementById("error").textContent = err.message;
+      }
+    };
+  </script>
+</body>
+</html>

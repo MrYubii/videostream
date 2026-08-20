@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VideoStream — Dashboard</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="nav-slot"></div>
+
+  <main class="container">
+    <div class="search-bar">
+      <input id="search" class="search-input" type="search" placeholder="Search videos, publishers, producers, genres…">
+      <select id="genre">
+        <option value="">All genres</option>
+      </select>
+      <select id="age">
+        <option value="">All ages</option>
+        <option value="U">U</option>
+        <option value="PG">PG</option>
+        <option value="12">12</option>
+        <option value="15">15</option>
+        <option value="18">18</option>
+      </select>
+      <select id="sort">
+        <option value="latest">Latest</option>
+        <option value="popular">Most viewed</option>
+      </select>
+      <button class="btn btn-primary" id="apply">Apply</button>
+    </div>
+
+    <div class="page-head">
+      <h1>Latest Videos</h1>
+      <span class="pill" id="count"></span>
+    </div>
+    <div id="videos" class="grid"></div>
+    <div id="more" style="text-align:center; margin: 24px 0;">
+      <button class="btn" id="load-more" hidden>Load more</button>
+    </div>
+  </main>
+
+  <dialog id="uploadModal">
+    <form id="uploadForm" class="form-card" style="margin:0; max-width:520px;">
+      <h1>Upload video</h1>
+      <div class="upload-zone" id="dropZone">
+        <div id="fileLabel">Click to choose an MP4 / WebM file (max 200 MB)</div>
+        <input type="file" id="file" accept="video/mp4,video/webm,video/ogg,video/quicktime,.mov,.m4v" hidden>
+      </div>
+      <progress id="uploadProgress" max="100" value="0" hidden></progress>
+      <div class="form-field"><label>Title</label><input name="title" required maxlength="255"></div>
+      <div class="form-field"><label>Publisher</label><input name="publisher" required maxlength="128"></div>
+      <div class="form-field"><label>Producer</label><input name="producer" maxlength="128"></div>
+      <div class="form-field"><label>Genre</label><input name="genre" required maxlength="64" list="genre-list"></div>
+      <datalist id="genre-list"></datalist>
+      <div class="form-field"><label>Age rating</label>
+        <select name="age_rating"><option>U</option><option>PG</option><option>12</option><option>15</option><option>18</option></select>
+      </div>
+      <div class="form-field"><label>Description</label><textarea name="description" rows="3" maxlength="2000"></textarea></div>
+      <div class="error" id="uploadError"></div>
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button type="button" class="btn" onclick="document.getElementById('uploadModal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="uploadBtn">Upload</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/common.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
