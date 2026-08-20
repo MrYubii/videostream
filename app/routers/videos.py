@@ -7,14 +7,14 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BeforeValidator
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.deps import get_current_user, require_role
-from app.models import AgeRating, Comment, Rating, Reaction, Role, User, Video, VideoStatus
-from app.schemas import VideoCreate, VideoDetail, VideoList, VideoOut, VideoUpdate
+from app.models import AgeRating, Role, User, Video, VideoStatus
+from app.repositories import VideoRepository
+from app.schemas import VideoDetail, VideoList, VideoUpdate
 from app.services.cache import cache
 from app.services.media import MediaProcessor
 from app.services.storage import LocalStorageBackend, get_storage_backend, materialise_local_path
@@ -25,13 +25,15 @@ settings = get_settings()
 storage = get_storage_backend()
 processor = MediaProcessor()
 
-CHUNK_SIZE = 1024 * 1024
 RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
-
 VIEW_WINDOW_SECONDS = 1800
 _view_cache: dict[tuple[int, str], float] = {}
-
 ALLOWED_SUFFIXES = {".mp4", ".webm", ".ogg", ".mov", ".m4v"}
+
+
+def get_videos(db: Session = Depends(get_db)) -> VideoRepository:
+    """Dependency boundary between the presentation and data-access tiers."""
+    return VideoRepository(db)
 
 
 def _empty_to_none(value: object) -> object:
@@ -39,10 +41,6 @@ def _empty_to_none(value: object) -> object:
 
 
 AgeRatingParam = Annotated[Optional[AgeRating], BeforeValidator(_empty_to_none)]
-
-
-def _escape_like(term: str) -> str:
-    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _parse_range(header: str, file_size: int) -> tuple[int, int] | None:
@@ -78,36 +76,6 @@ def _should_count_view(video_id: int, client_ip: str) -> bool:
     return True
 
 
-def _aggregate(db: Session, video_ids: list[int]) -> dict[int, dict]:
-    rating_rows = (
-        db.query(Rating.video_id, func.avg(Rating.value), func.count(Rating.id))
-        .filter(Rating.video_id.in_(video_ids))
-        .group_by(Rating.video_id)
-        .all()
-    )
-    comment_rows = (
-        db.query(Comment.video_id, func.count(Comment.id))
-        .filter(Comment.video_id.in_(video_ids))
-        .group_by(Comment.video_id)
-        .all()
-    )
-    reaction_rows = (
-        db.query(Reaction.video_id, Reaction.reaction, func.count(Reaction.id))
-        .filter(Reaction.video_id.in_(video_ids))
-        .group_by(Reaction.video_id, Reaction.reaction)
-        .all()
-    )
-    aggregates: dict[int, dict] = {}
-    for video_id, avg, count in rating_rows:
-        aggregates.setdefault(video_id, {}).update(rating_average=round(float(avg), 1), rating_count=count)
-    for video_id, count in comment_rows:
-        aggregates.setdefault(video_id, {}).update(comment_count=count)
-    for video_id, reaction, count in reaction_rows:
-        agg = aggregates.setdefault(video_id, {})
-        agg[f"{reaction.value}_count"] = count
-    return aggregates
-
-
 def _serialize(video: Video, agg: Optional[dict] = None, include_detail: bool = False) -> dict:
     agg = agg or {}
     payload = {
@@ -141,14 +109,13 @@ def _serialize(video: Video, agg: Optional[dict] = None, include_detail: bool = 
 
 @router.get("", response_model=VideoList)
 def list_videos(
-    request: Request,
     search: str = "",
     genre: str = "",
     age_rating: AgeRatingParam = None,
     sort: str = "latest",
     offset: int = 0,
     limit: int = 0,
-    db: Session = Depends(get_db),
+    videos: VideoRepository = Depends(get_videos),
 ):
     limit = limit if limit > 0 else settings.dashboard_page_size
     limit = min(limit, 100)
@@ -157,41 +124,31 @@ def list_videos(
     if cached is not None:
         return cached
 
-    query = db.query(Video).filter(Video.status == VideoStatus.READY)
-    if search:
-        like = f"%{_escape_like(search)}%"
-        query = query.filter(
-            (Video.title.ilike(like, escape="\\"))
-            | (Video.publisher.ilike(like, escape="\\"))
-            | (Video.producer.ilike(like, escape="\\"))
-            | (Video.genre.ilike(like, escape="\\"))
-        )
-    if genre:
-        query = query.filter(Video.genre == genre)
-    if age_rating:
-        query = query.filter(Video.age_rating == age_rating)
-
-    total = query.count()
-    if sort == "popular":
-        query = query.order_by(Video.view_count.desc(), Video.created_at.desc())
-    else:
-        query = query.order_by(Video.created_at.desc())
-
-    videos = query.offset(offset).limit(limit).all()
-    aggregates = _aggregate(db, [v.id for v in videos])
-    items = [_serialize(v, aggregates.get(v.id)) for v in videos]
-
-    response = VideoList(total=total, offset=offset, limit=limit, items=items)
+    total, items = videos.list_ready(
+        search=search,
+        genre=genre,
+        age_rating=age_rating,
+        sort=sort,
+        offset=offset,
+        limit=limit,
+    )
+    aggregates = videos.aggregate([v.id for v in items])
+    response = VideoList(
+        total=total,
+        offset=offset,
+        limit=limit,
+        items=[_serialize(v, aggregates.get(v.id)) for v in items],
+    )
     cache.set(cache_key, response, settings.cache_ttl_seconds)
     return response
 
 
 @router.get("/{video_id}", response_model=VideoDetail)
-def get_video(video_id: int, db: Session = Depends(get_db)):
-    video = db.get(Video, video_id)
+def get_video(video_id: int, videos: VideoRepository = Depends(get_videos)):
+    video = videos.get(video_id)
     if video is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
-    agg = _aggregate(db, [video.id]).get(video.id, {})
+    agg = videos.aggregate([video.id]).get(video.id, {})
     return _serialize(video, agg, include_detail=True)
 
 
@@ -199,10 +156,10 @@ def get_video(video_id: int, db: Session = Depends(get_db)):
 def update_video(
     video_id: int,
     payload: VideoUpdate,
-    db: Session = Depends(get_db),
+    videos: VideoRepository = Depends(get_videos),
     user: User = Depends(get_current_user),
 ):
-    video = db.get(Video, video_id)
+    video = videos.get(video_id)
     if video is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
     if video.uploader_id != user.id and user.role != Role.ADMIN:
@@ -219,37 +176,34 @@ def update_video(
         video.age_rating = payload.age_rating
     if payload.description is not None:
         video.description = payload.description
-    db.commit()
-    db.refresh(video)
+    videos.save(video)
     cache.invalidate_prefix("videos:list:")
-    agg = _aggregate(db, [video.id]).get(video.id, {})
+    agg = videos.aggregate([video.id]).get(video.id, {})
     return _serialize(video, agg, include_detail=True)
 
 
 @router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_video(
     video_id: int,
-    db: Session = Depends(get_db),
+    videos: VideoRepository = Depends(get_videos),
     user: User = Depends(get_current_user),
 ):
-    video = db.get(Video, video_id)
+    video = videos.get(video_id)
     if video is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
     if video.uploader_id != user.id and user.role != Role.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your video")
-
     storage.delete(video.storage_key)
     if video.thumbnail_key:
         storage.delete(video.thumbnail_key)
-    db.delete(video)
-    db.commit()
+    videos.delete(video)
     cache.invalidate_prefix("videos:list:")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{video_id}/stream")
-async def stream_video(video_id: int, request: Request, db: Session = Depends(get_db)):
-    video = db.get(Video, video_id)
+async def stream_video(video_id: int, request: Request, videos: VideoRepository = Depends(get_videos)):
+    video = videos.get(video_id)
     if video is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
     if video.status != VideoStatus.READY:
@@ -276,9 +230,9 @@ async def stream_video(video_id: int, request: Request, db: Session = Depends(ge
 
     client_ip = request.client.host if request.client else "unknown"
     if _should_count_view(video_id, client_ip):
-        db.query(Video).filter(Video.id == video_id).update({Video.view_count: Video.view_count + 1})
-        db.commit()
+        videos.increment_view(video_id)
         cache.invalidate_prefix("videos:list:")
+        video = videos.get(video_id) or video
 
     headers = {
         "Accept-Ranges": "bytes",
@@ -307,7 +261,7 @@ async def upload_video(
     age_rating: AgeRating = Form(AgeRating.U),
     description: str = Form("", max_length=2000),
     user: User = Depends(require_role(Role.CREATOR, Role.ADMIN)),
-    db: Session = Depends(get_db),
+    videos: VideoRepository = Depends(get_videos),
 ):
     suffix = Path(file.filename or "").suffix.lower()
     content_type = (file.content_type or "").lower()
@@ -328,47 +282,44 @@ async def upload_video(
     storage_key = f"videos/{uuid.uuid4().hex}{suffix}"
     storage.save(storage_key, fh, content_type)
 
-    video = Video(
-        title=title,
-        publisher=publisher,
-        producer=producer,
-        genre=genre,
-        age_rating=age_rating,
-        description=description,
-        storage_key=storage_key,
-        content_type=content_type,
-        status=VideoStatus.PROCESSING,
-        uploader_id=user.id,
+    video = videos.add(
+        Video(
+            title=title,
+            publisher=publisher,
+            producer=producer,
+            genre=genre,
+            age_rating=age_rating,
+            description=description,
+            storage_key=storage_key,
+            content_type=content_type,
+            status=VideoStatus.PROCESSING,
+            uploader_id=user.id,
+        )
     )
-    db.add(video)
-    db.commit()
-    db.refresh(video)
-
     background_tasks.add_task(_process_video, video.id)
     cache.invalidate_prefix("videos:list:")
-
-    agg = _aggregate(db, [video.id]).get(video.id, {})
+    agg = videos.aggregate([video.id]).get(video.id, {})
     return _serialize(video, agg, include_detail=True)
 
 
 def _process_video(video_id: int) -> None:
     db = SessionLocal()
+    videos = VideoRepository(db)
     source_path: Optional[Path] = None
     thumb_local: Optional[Path] = None
     transcode_path: Optional[Path] = None
     try:
-        video = db.get(Video, video_id)
+        video = videos.get(video_id)
         if video is None:
             return
         try:
             source_path = materialise_local_path(storage, video.storage_key)
             if source_path is None:
                 video.status = VideoStatus.FAILED
-                db.commit()
+                videos.save(video)
                 return
 
             duration, size_bytes = processor.probe(source_path)
-
             transcode_path = Path(source_path.parent) / f"trans-{video_id}.mp4"
             if processor.transcode(source_path, transcode_path):
                 with open(transcode_path, "rb") as fh:
@@ -388,11 +339,10 @@ def _process_video(video_id: int) -> None:
                 with open(thumb_local, "rb") as fh:
                     storage.save(thumb_key, fh, "image/jpeg")
                 video.thumbnail_key = thumb_key
-
             video.status = VideoStatus.READY
         except Exception:
             video.status = VideoStatus.FAILED
-        db.commit()
+        videos.save(video)
         cache.invalidate_prefix("videos:list:")
     finally:
         for tmp in (thumb_local, transcode_path):
