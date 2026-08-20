@@ -5,16 +5,25 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import get_current_user, require_role
 from app.models import Comment, Rating, Role, User, Video
+from app.repositories import UserRepository
 from app.schemas import CreatorCreateRequest, CreatorUpdate, StatsOut, UserOut
-from app.security import hash_password
+from app.services.auth import AuthService
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_role(Role.ADMIN))])
 
 
+def get_user_repo(db: Session = Depends(get_db)) -> UserRepository:
+    return UserRepository(db)
+
+
+def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
+    return AuthService(UserRepository(db))
+
+
 @router.get("/stats", response_model=StatsOut)
-def get_stats(db: Session = Depends(get_db)):
+def get_stats(db: Session = Depends(get_db), users: UserRepository = Depends(get_user_repo)):
     return StatsOut(
-        total_creators=db.query(User).filter(User.role == Role.CREATOR).count(),
+        total_creators=users.count_by_role(Role.CREATOR),
         total_videos=db.query(Video).count(),
         total_views=int(db.query(func.sum(Video.view_count)).scalar() or 0),
         total_comments=db.query(Comment).count(),
@@ -23,38 +32,23 @@ def get_stats(db: Session = Depends(get_db)):
 
 
 @router.post("/creators", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def create_creator(payload: CreatorCreateRequest, db: Session = Depends(get_db)):
-    if db.query(User).filter(func.lower(User.username) == payload.username.lower()).first():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already taken")
-    if db.query(User).filter(func.lower(User.email) == payload.email.lower()).first():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-
-    creator = User(
-        username=payload.username,
-        email=payload.email,
-        full_name=payload.full_name,
-        password_hash=hash_password(payload.password),
-        role=Role.CREATOR,
-    )
-    db.add(creator)
-    db.commit()
-    db.refresh(creator)
-    return creator
+def create_creator(payload: CreatorCreateRequest, service: AuthService = Depends(get_auth_service)):
+    return service.create_creator(payload)
 
 
 @router.get("/creators", response_model=list[UserOut])
-def list_creators(db: Session = Depends(get_db)):
-    return db.query(User).filter(User.role == Role.CREATOR).order_by(User.created_at).all()
+def list_creators(users: UserRepository = Depends(get_user_repo)):
+    return users.list_by_role(Role.CREATOR)
 
 
 @router.patch("/creators/{creator_id}", response_model=UserOut)
 def update_creator(
     creator_id: int,
     payload: CreatorUpdate,
-    db: Session = Depends(get_db),
+    users: UserRepository = Depends(get_user_repo),
     user: User = Depends(get_current_user),
 ):
-    creator = db.get(User, creator_id)
+    creator = users.get(creator_id)
     if creator is None or creator.role not in (Role.CREATOR, Role.CONSUMER):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Creator not found")
     if creator.id == user.id:
@@ -65,6 +59,4 @@ def update_creator(
         creator.role = payload.role
     if payload.is_active is not None:
         creator.is_active = payload.is_active
-    db.commit()
-    db.refresh(creator)
-    return creator
+    return users.save(creator)
