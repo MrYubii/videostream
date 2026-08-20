@@ -6,6 +6,10 @@ from sqlalchemy.orm import Session
 from app.models import Comment, Rating, Reaction, Role, User, Video, VideoStatus
 
 
+def _escape_like(term: str) -> str:
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class UserRepository:
     """Data-access tier for users. Business rules stay in services/routers."""
 
@@ -51,19 +55,10 @@ class VideoRepository:
     def get(self, video_id: int) -> Optional[Video]:
         return self.db.get(Video, video_id)
 
-    def list_ready(
-        self,
-        *,
-        search: str,
-        genre: str,
-        age_rating,
-        sort: str,
-        offset: int,
-        limit: int,
-    ) -> tuple[int, list[Video]]:
+    def list_ready(self, *, search: str, genre: str, age_rating, sort: str, offset: int, limit: int) -> tuple[int, list[Video]]:
         query = self.db.query(Video).filter(Video.status == VideoStatus.READY)
         if search:
-            like = f"%{search}%"
+            like = f"%{_escape_like(search)}%"
             query = query.filter(
                 (Video.title.ilike(like, escape="\\"))
                 | (Video.publisher.ilike(like, escape="\\"))
