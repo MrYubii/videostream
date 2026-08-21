@@ -6,3 +6,6 @@ __pycache__/
 .env
 data/*.db
 data/media/
+
+data/*.db-shm
+data/*.db-wal
