@@ -1,5 +1,6 @@
 # VideoStream — Scalable Video Sharing Platform
 
+
 A cloud-native, TikTok-style video sharing web application for **COM769 Scalable Advanced Software Solutions Coursework 2**. The solution uses **FastAPI + Python**, role-based JWT authentication, N-tier architecture, object storage abstraction, background media processing, HTTP Range streaming, caching, rate limiting, automated testing and Azure deployment.
 
 ## Coursework features
