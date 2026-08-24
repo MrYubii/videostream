@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — VideoStream</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="nav-slot"></div>
+
+  <main class="container">
+    <div class="page-head">
+      <h1>Creator management</h1>
+      <span class="pill">Admin only</span>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat"><h2 id="statCreators">0</h2><span>Creators</span></div>
+      <div class="stat"><h2 id="statVideos">0</h2><span>Videos</span></div>
+      <div class="stat"><h2 id="statViews">0</h2><span>Total views</span></div>
+      <div class="stat"><h2 id="statComments">0</h2><span>Comments</span></div>
+      <div class="stat"><h2 id="statRatings">0</h2><span>Ratings</span></div>
+    </div>
+
+    <div class="detail-grid">
+      <div class="panel">
+        <h2>Enrol a creator</h2>
+        <form id="creatorForm">
+          <div class="form-field"><label>Username</label><input name="username" required minlength="3" maxlength="64"></div>
+          <div class="form-field"><label>Email</label><input name="email" type="email" required></div>
+          <div class="form-field"><label>Full name</label><input name="full_name" maxlength="128"></div>
+          <div class="form-field"><label>Temporary password (min 8 chars)</label><input name="password" type="password" required minlength="8"></div>
+          <button class="btn btn-primary" type="submit">Enrol creator</button>
+          <div class="error" id="formError"></div>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h2>Creators</h2>
+        <table>
+          <thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
+          <tbody id="creatorsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/common.js"></script>
+  <script src="/js/admin.js"></script>
+</body>
+</html>

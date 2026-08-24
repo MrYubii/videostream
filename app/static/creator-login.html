@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Creator sign in — VideoStream</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="nav-slot"></div>
+  <form id="loginForm" class="form-card">
+    <h1>Creator sign in</h1>
+    <p class="hint">Creator accounts are created by an administrator. Use your assigned creator credentials.</p>
+    <div class="form-field"><label>Username</label><input name="username" required autocomplete="username"></div>
+    <div class="form-field"><label>Password</label><input name="password" type="password" required autocomplete="current-password"></div>
+    <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center;">Sign in as creator</button>
+    <div class="error" id="error"></div>
+    <div class="hint"><a href="/login.html" style="color:var(--accent-2);">Consumer / standard sign in</a></div>
+  </form>
+  <script src="/js/api.js"></script>
+  <script src="/js/common.js"></script>
+  <script>
+    initNav("");
+    document.getElementById("loginForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const error = document.getElementById("error");
+      error.textContent = "";
+      const f = e.target;
+      try {
+        const res = await API.login({
+          username: f.username.value.trim(),
+          password: f.password.value,
+        });
+        if (res.role !== "creator" && res.role !== "admin") {
+          throw new Error("This page is for creator accounts. Please use standard sign in.");
+        }
+        localStorage.setItem("token", res.access_token);
+        localStorage.setItem("refreshToken", res.refresh_token);
+        setCurrentUser({ username: res.username, role: res.role });
+        location.href = "/";
+      } catch (err) {
+        error.textContent = err.message;
+      }
+    };
+  </script>
+</body>
+</html>
